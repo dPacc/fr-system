@@ -24,16 +24,46 @@ const FacialRecognitionApp = () => {
   }, [isModelLoaded]);
 
   const loadModels = async () => {
-    const MODEL_URL = `${process.env.PUBLIC_URL}/models`;
+    const MODEL_URL =
+      "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
+
+    console.log("Attempting to load models from:", MODEL_URL);
 
     try {
+      console.log("--- Loading SSD Mobilenet model ---");
       await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+      console.log("SSD Mobilenet model loaded successfully");
+
+      console.log("--- Loading Face Landmark model ---");
       await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+      console.log("Face Landmark model loaded successfully");
+
+      console.log("--- Loading Face Recognition model ---");
       await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+      console.log("Face Recognition model loaded successfully");
+
       setIsModelLoaded(true);
-      console.log("Face recognition models loaded");
+      console.log("=== Face recognition models loaded ===");
     } catch (error) {
       console.error("Error loading models:", error);
+      console.error("Error details:", error.message);
+      if (error.stack) {
+        console.error("Error stack:", error.stack);
+      }
+
+      // Log the current state of each model
+      console.log(
+        "SSD Mobilenet model loaded:",
+        faceapi.nets.ssdMobilenetv1.isLoaded
+      );
+      console.log(
+        "Face Landmark model loaded:",
+        faceapi.nets.faceLandmark68Net.isLoaded
+      );
+      console.log(
+        "Face Recognition model loaded:",
+        faceapi.nets.faceRecognitionNet.isLoaded
+      );
     }
   };
 
