@@ -166,8 +166,9 @@ const FacialRecognitionApp = () => {
     resizedDetections.forEach((detection) => {
       const result = faceMatcher.findBestMatch(detection.descriptor);
       const box = detection.detection.box;
+      const label = result.label !== "unknown" ? result.label : "Unknown";
       const drawBox = new faceapi.draw.DrawBox(box, {
-        label: result.toString(),
+        label: label,
         lineWidth: 2,
         boxColor: "blue",
         drawLabelOptions: {
@@ -183,7 +184,7 @@ const FacialRecognitionApp = () => {
 
     if (resizedDetections.length > 0) {
       const result = faceMatcher.findBestMatch(resizedDetections[0].descriptor);
-      setRecognizedName(result.toString());
+      setRecognizedName(result.label !== "unknown" ? result.label : "Unknown");
     } else {
       setRecognizedName("No face detected");
     }
