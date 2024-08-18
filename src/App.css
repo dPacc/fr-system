@@ -7,7 +7,7 @@ body {
 
 .facial-recognition-app {
   max-width: 800px;
-  margin: 0 auto;
+  margin: 20px auto;
   padding: 20px;
   background-color: #ffffff;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
@@ -49,10 +49,39 @@ h1 {
   align-items: center;
 }
 
+.tabs {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.tabs button {
+  padding: 10px 20px;
+  font-size: 16px;
+  background-color: #f0f0f0;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+  transition: background-color 0.3s;
+}
+
+.tabs button.active {
+  background-color: #3498db;
+  color: white;
+}
+
+.tabs button:hover:not(.active) {
+  background-color: #e0e0e0;
+}
+
 .webcam-container {
   position: relative;
   margin-bottom: 20px;
-  display: inline-block; /* This ensures the container fits the webcam size */
+  display: inline-block;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
 .face-overlay {
@@ -61,14 +90,16 @@ h1 {
   left: 0;
 }
 
-.recognition-result {
+.face-position-label {
   position: absolute;
-  bottom: 10px;
+  top: 10px;
   left: 10px;
   background-color: rgba(0, 0, 0, 0.7);
   color: white;
   padding: 5px 10px;
   border-radius: 4px;
+  font-size: 14px;
+  font-weight: bold;
 }
 
 .controls {
@@ -111,6 +142,7 @@ button.training {
   flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
+  margin-top: 20px;
 }
 
 .captured-image {
@@ -119,4 +151,74 @@ button.training {
   object-fit: cover;
   border-radius: 4px;
   border: 2px solid #3498db;
+  transition: transform 0.3s;
+}
+
+.captured-image:hover {
+  transform: scale(1.05);
+}
+
+.training-tab, .testing-tab {
+  width: 100%;
+}
+
+.training-steps {
+  background-color: #f8f8f8;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.05);
+}
+
+.training-steps h3 {
+  margin-top: 0;
+  color: #333;
+}
+
+.training-steps ol {
+  padding-left: 20px;
+  color: #555;
+}
+
+.training-steps li {
+  margin-bottom: 10px;
+}
+
+.recognition-result {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 18px;
+  background-color: #f8f8f8;
+  padding: 10px;
+  border-radius: 4px;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.05);
+}
+
+.recognition-result h3 {
+  margin-top: 0;
+  color: #333;
+}
+
+.recognition-result p {
+  font-weight: bold;
+  color: #3498db;
+}
+
+@media (max-width: 768px) {
+  .facial-recognition-app {
+    padding: 10px;
+  }
+
+  .webcam-container {
+    width: 100%;
+  }
+
+  .captured-images {
+    gap: 5px;
+  }
+
+  .captured-image {
+    width: 80px;
+    height: 60px;
+  }
 }

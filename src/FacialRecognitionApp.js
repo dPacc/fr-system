@@ -12,6 +12,10 @@ const FacialRecognitionApp = () => {
   const [recognizedName, setRecognizedName] = useState("");
   const [isTraining, setIsTraining] = useState(false);
   const [faceMatcher, setFaceMatcher] = useState(null);
+  const [activeTab, setActiveTab] = useState("train");
+  const [faceDetected, setFaceDetected] = useState(false);
+  const [facePosition, setFacePosition] = useState("not-detected");
+  const [isVideoReady, setIsVideoReady] = useState(false);
 
   useEffect(() => {
     loadModels();
@@ -23,47 +27,34 @@ const FacialRecognitionApp = () => {
     }
   }, [isModelLoaded]);
 
+  useEffect(() => {
+    resetState();
+  }, [activeTab]);
+
+  const resetState = () => {
+    setIsVideoReady(false);
+    setFaceDetected(false);
+    setFacePosition("not-detected");
+    setRecognizedName("");
+    if (canvasRef.current) {
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  };
+
   const loadModels = async () => {
     const MODEL_URL =
       "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
 
-    console.log("Attempting to load models from:", MODEL_URL);
-
     try {
-      console.log("--- Loading SSD Mobilenet model ---");
       await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-      console.log("SSD Mobilenet model loaded successfully");
-
-      console.log("--- Loading Face Landmark model ---");
       await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-      console.log("Face Landmark model loaded successfully");
-
-      console.log("--- Loading Face Recognition model ---");
       await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-      console.log("Face Recognition model loaded successfully");
-
       setIsModelLoaded(true);
-      console.log("=== Face recognition models loaded ===");
+      console.log("Face recognition models loaded successfully");
     } catch (error) {
       console.error("Error loading models:", error);
-      console.error("Error details:", error.message);
-      if (error.stack) {
-        console.error("Error stack:", error.stack);
-      }
-
-      // Log the current state of each model
-      console.log(
-        "SSD Mobilenet model loaded:",
-        faceapi.nets.ssdMobilenetv1.isLoaded
-      );
-      console.log(
-        "Face Landmark model loaded:",
-        faceapi.nets.faceLandmark68Net.isLoaded
-      );
-      console.log(
-        "Face Recognition model loaded:",
-        faceapi.nets.faceRecognitionNet.isLoaded
-      );
     }
   };
 
@@ -83,8 +74,116 @@ const FacialRecognitionApp = () => {
     }
   };
 
+  const detectFace = async () => {
+    if (!webcamRef.current || !canvasRef.current || !isVideoReady) return;
+
+    const video = webcamRef.current.video;
+    const canvas = canvasRef.current;
+
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      console.log("Video dimensions not ready yet");
+      return;
+    }
+
+    const displaySize = { width: video.videoWidth, height: video.videoHeight };
+    faceapi.matchDimensions(canvas, displaySize);
+
+    try {
+      const detections = await faceapi
+        .detectAllFaces(video)
+        .withFaceLandmarks();
+      const resizedDetections = faceapi.resizeResults(detections, displaySize);
+
+      canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+
+      if (resizedDetections.length > 0) {
+        setFaceDetected(true);
+        const detection = resizedDetections[0];
+        const box = detection.detection.box;
+
+        if (activeTab === "train" && isValidBox(box)) {
+          const drawBox = new faceapi.draw.DrawBox(box, {
+            label: getFacePositionLabel(box, displaySize),
+            boxColor: getFacePositionColor(box, displaySize),
+          });
+          drawBox.draw(canvas);
+          setFacePosition(getFacePositionLabel(box, displaySize));
+        }
+      } else {
+        setFaceDetected(false);
+        setFacePosition("not-detected");
+      }
+    } catch (error) {
+      console.error("Error in detectFace:", error);
+    }
+  };
+
+  const isValidBox = (box) => {
+    return (
+      box &&
+      typeof box.x === "number" &&
+      typeof box.y === "number" &&
+      typeof box.width === "number" &&
+      typeof box.height === "number"
+    );
+  };
+
+  const getFacePositionLabel = (box, displaySize) => {
+    if (!isValidBox(box)) return "Invalid face position";
+
+    const centerX = box.x + box.width / 2;
+    const centerY = box.y + box.height / 2;
+    const threshold = 0.2;
+
+    if (
+      box.width < displaySize.width * 0.3 ||
+      box.height < displaySize.height * 0.3
+    ) {
+      return "Move closer";
+    }
+
+    if (
+      box.width > displaySize.width * 0.8 ||
+      box.height > displaySize.height * 0.8
+    ) {
+      return "Move farther";
+    }
+
+    if (centerX < displaySize.width * threshold) return "Move right";
+    if (centerX > displaySize.width * (1 - threshold)) return "Move left";
+    if (centerY < displaySize.height * threshold) return "Move down";
+    if (centerY > displaySize.height * (1 - threshold)) return "Move up";
+
+    return "Good position";
+  };
+
+  const getFacePositionColor = (box, displaySize) => {
+    const label = getFacePositionLabel(box, displaySize);
+    return label === "Good position" ? "green" : "red";
+  };
+
+  useEffect(() => {
+    let intervalId;
+    if (isModelLoaded && webcamRef.current && isVideoReady) {
+      const processFace = () => {
+        if (activeTab === "train") {
+          detectFace();
+        } else {
+          recognizeFace();
+        }
+      };
+
+      intervalId = setInterval(processFace, 100);
+    }
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isModelLoaded, activeTab, isVideoReady]);
+
   const captureImage = async () => {
-    if (webcamRef.current) {
+    if (webcamRef.current && faceDetected && facePosition === "Good position") {
       const imageSrc = webcamRef.current.getScreenshot();
       setCapturedImages((prev) => [...prev, imageSrc]);
     }
@@ -119,25 +218,17 @@ const FacialRecognitionApp = () => {
         personName,
         descriptions
       );
-
-      // Get existing descriptors
       const existingDescriptors = JSON.parse(
         localStorage.getItem("faceDescriptors") || "[]"
       );
-
-      // Add new descriptor
       existingDescriptors.push({
         label: newFaceDescriptor.label,
         descriptors: newFaceDescriptor.descriptors.map((d) => Array.from(d)),
       });
-
-      // Save updated descriptors
       localStorage.setItem(
         "faceDescriptors",
         JSON.stringify(existingDescriptors)
       );
-
-      // Update faceMatcher
       loadStoredDescriptors();
     }
 
@@ -147,60 +238,160 @@ const FacialRecognitionApp = () => {
   };
 
   const recognizeFace = async () => {
-    if (!isModelLoaded || !webcamRef.current || !faceMatcher) return;
+    if (!isModelLoaded || !webcamRef.current || !faceMatcher || !isVideoReady)
+      return;
 
     const video = webcamRef.current.video;
     const canvas = canvasRef.current;
-    const displaySize = { width: video.width, height: video.height };
+
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      console.log("Video dimensions not ready yet");
+      return;
+    }
+
+    const displaySize = { width: video.videoWidth, height: video.videoHeight };
     faceapi.matchDimensions(canvas, displaySize);
 
-    const detections = await faceapi
-      .detectAllFaces(video)
-      .withFaceLandmarks()
-      .withFaceDescriptors();
+    try {
+      const detections = await faceapi
+        .detectAllFaces(video)
+        .withFaceLandmarks()
+        .withFaceDescriptors();
 
-    const resizedDetections = faceapi.resizeResults(detections, displaySize);
+      const resizedDetections = faceapi.resizeResults(detections, displaySize);
 
-    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+      canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
 
-    resizedDetections.forEach((detection) => {
-      const result = faceMatcher.findBestMatch(detection.descriptor);
-      const box = detection.detection.box;
-      const label = result.label !== "unknown" ? result.label : "Unknown";
-      const drawBox = new faceapi.draw.DrawBox(box, {
-        label: label,
-        lineWidth: 2,
-        boxColor: "blue",
-        drawLabelOptions: {
-          fontSize: 16,
-          fontStyle: "bold",
-          fontColor: "white",
-          fontFamily: "Arial",
-          backgroundColor: "rgba(0, 0, 255, 0.8)",
-        },
+      if (resizedDetections.length === 0) {
+        setRecognizedName("Person not detected");
+        return;
+      }
+
+      resizedDetections.forEach((detection) => {
+        const result = faceMatcher.findBestMatch(detection.descriptor);
+        const box = detection.detection.box;
+        if (isValidBox(box)) {
+          const drawBox = new faceapi.draw.DrawBox(box, {
+            label: result.label !== "unknown" ? result.label : "Unknown person",
+            lineWidth: 2,
+            boxColor: result.label !== "unknown" ? "blue" : "red",
+            drawLabelOptions: {
+              fontSize: 16,
+              fontStyle: "bold",
+              fontColor: "white",
+              backgroundColor:
+                result.label !== "unknown"
+                  ? "rgba(0, 0, 255, 0.8)"
+                  : "rgba(255, 0, 0, 0.8)",
+            },
+          });
+          drawBox.draw(canvas);
+        }
       });
-      drawBox.draw(canvas);
-    });
 
-    if (resizedDetections.length > 0) {
-      const result = faceMatcher.findBestMatch(resizedDetections[0].descriptor);
-      setRecognizedName(result.label !== "unknown" ? result.label : "Unknown");
-    } else {
-      setRecognizedName("No face detected");
+      if (resizedDetections.length > 0) {
+        const result = faceMatcher.findBestMatch(
+          resizedDetections[0].descriptor
+        );
+        setRecognizedName(
+          result.label !== "unknown" ? result.label : "Unknown person"
+        );
+      }
+    } catch (error) {
+      console.error("Error in recognizeFace:", error);
+      setRecognizedName("Error detecting face");
     }
   };
 
-  useEffect(() => {
-    if (isModelLoaded && webcamRef.current) {
-      const interval = setInterval(recognizeFace, 100);
-      return () => clearInterval(interval);
-    }
-  }, [isModelLoaded, faceMatcher]);
+  const handleVideoLoad = () => {
+    setIsVideoReady(true);
+  };
+
+  const renderTrainingTab = () => (
+    <div className="training-tab">
+      <h2>Training</h2>
+      <div className="training-steps">
+        <h3>Steps to Train the Model:</h3>
+        <ol>
+          <li>Ensure good lighting and a clear background.</li>
+          <li>Position your face in the center of the camera view.</li>
+          <li>
+            Follow the on-screen instructions to properly position your face.
+          </li>
+          <li>Click "Capture Image" when your face is in a good position.</li>
+          <li>
+            Capture 5 different images with varied expressions and angles.
+          </li>
+          <li>Once you've captured 5 images, click "Train Model".</li>
+          <li>Enter your name when prompted to complete the training.</li>
+        </ol>
+      </div>
+      <div className="webcam-container">
+        <Webcam
+          audio={false}
+          ref={webcamRef}
+          screenshotFormat="image/jpeg"
+          videoConstraints={{ width: 640, height: 480 }}
+          onLoadedData={handleVideoLoad}
+        />
+        <canvas ref={canvasRef} className="face-overlay" />
+        <div className="face-position-label">{facePosition}</div>
+      </div>
+      <div className="controls">
+        <button
+          onClick={captureImage}
+          disabled={
+            isTraining || !faceDetected || facePosition !== "Good position"
+          }
+          className={capturedImages.length >= 5 ? "complete" : ""}
+        >
+          Capture Image ({capturedImages.length}/5)
+        </button>
+        <button
+          onClick={trainModel}
+          disabled={isTraining || capturedImages.length < 5}
+          className={isTraining ? "training" : ""}
+        >
+          {isTraining ? "Training..." : "Train Model"}
+        </button>
+      </div>
+      <div className="captured-images">
+        {capturedImages.map((src, index) => (
+          <img
+            key={index}
+            src={src}
+            alt={`Captured ${index + 1}`}
+            className="captured-image"
+          />
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderTestingTab = () => (
+    <div className="testing-tab">
+      <h2>Testing</h2>
+      <div className="webcam-container">
+        <Webcam
+          audio={false}
+          ref={webcamRef}
+          screenshotFormat="image/jpeg"
+          videoConstraints={{ width: 640, height: 480 }}
+          onLoadedData={handleVideoLoad}
+        />
+        <canvas ref={canvasRef} className="face-overlay" />
+      </div>
+      <div className="recognition-result">
+        <h3>Recognition Result:</h3>
+        <p>{recognizedName}</p>
+      </div>
+    </div>
+  );
 
   return (
     <div className="facial-recognition-app">
       <header>
-        <h1>Facial Recognition App</h1>
+        <h1>Facial Recognition System</h1>
       </header>
       {!isModelLoaded ? (
         <div className="loading">
@@ -209,42 +400,21 @@ const FacialRecognitionApp = () => {
         </div>
       ) : (
         <div className="app-content">
-          <div className="webcam-container">
-            <Webcam
-              audio={false}
-              ref={webcamRef}
-              screenshotFormat="image/jpeg"
-              width={640}
-              height={480}
-            />
-            <canvas ref={canvasRef} className="face-overlay" />
-          </div>
-          <div className="controls">
+          <div className="tabs">
             <button
-              onClick={captureImage}
-              disabled={isTraining}
-              className={capturedImages.length >= 5 ? "complete" : ""}
+              className={activeTab === "train" ? "active" : ""}
+              onClick={() => setActiveTab("train")}
             >
-              Capture Image ({capturedImages.length}/5)
+              Training
             </button>
             <button
-              onClick={trainModel}
-              disabled={isTraining || capturedImages.length < 5}
-              className={isTraining ? "training" : ""}
+              className={activeTab === "test" ? "active" : ""}
+              onClick={() => setActiveTab("test")}
             >
-              {isTraining ? "Training..." : "Train Model"}
+              Testing
             </button>
           </div>
-          <div className="captured-images">
-            {capturedImages.map((src, index) => (
-              <img
-                key={index}
-                src={src}
-                alt={`Captured ${index + 1}`}
-                className="captured-image"
-              />
-            ))}
-          </div>
+          {activeTab === "train" ? renderTrainingTab() : renderTestingTab()}
         </div>
       )}
     </div>
