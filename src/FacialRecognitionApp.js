@@ -16,6 +16,8 @@ const FacialRecognitionApp = () => {
   const [faceDetected, setFaceDetected] = useState(false);
   const [facePosition, setFacePosition] = useState("not-detected");
   const [isVideoReady, setIsVideoReady] = useState(false);
+  const [location, setLocation] = useState(null);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
 
   useEffect(() => {
     loadModels();
@@ -36,6 +38,7 @@ const FacialRecognitionApp = () => {
     setFaceDetected(false);
     setFacePosition("not-detected");
     setRecognizedName("");
+    setLocation(null);
     if (canvasRef.current) {
       const canvas = canvasRef.current;
       const context = canvas.getContext("2d");
@@ -182,10 +185,67 @@ const FacialRecognitionApp = () => {
     };
   }, [isModelLoaded, activeTab, isVideoReady]);
 
+  const getLocation = async () => {
+    return new Promise((resolve, reject) => {
+      if ("geolocation" in navigator) {
+        setIsGettingLocation(true);
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            try {
+              const { latitude, longitude } = position.coords;
+              const response = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+              );
+              const data = await response.json();
+              setIsGettingLocation(false);
+              resolve({
+                latitude,
+                longitude,
+                city:
+                  data.address.city ||
+                  data.address.town ||
+                  data.address.village,
+                state: data.address.state,
+                country: data.address.country,
+                postcode: data.address.postcode,
+                fullAddress: data.display_name,
+              });
+            } catch (error) {
+              console.error("Error fetching location details:", error);
+              setIsGettingLocation(false);
+              reject(error);
+            }
+          },
+          (error) => {
+            setIsGettingLocation(false);
+            reject(error);
+          }
+        );
+      } else {
+        reject(new Error("Geolocation is not supported by this browser."));
+      }
+    });
+  };
+
   const captureImage = async () => {
     if (webcamRef.current && faceDetected && facePosition === "Good position") {
-      const imageSrc = webcamRef.current.getScreenshot();
-      setCapturedImages((prev) => [...prev, imageSrc]);
+      try {
+        const imageSrc = webcamRef.current.getScreenshot();
+        const currentLocation = await getLocation();
+        setCapturedImages((prev) => [
+          ...prev,
+          { src: imageSrc, location: currentLocation },
+        ]);
+        setLocation(currentLocation);
+      } catch (error) {
+        console.error("Error getting location:", error);
+        alert("Failed to get location. Image captured without location data.");
+        const imageSrc = webcamRef.current.getScreenshot();
+        setCapturedImages((prev) => [
+          ...prev,
+          { src: imageSrc, location: null },
+        ]);
+      }
     }
   };
 
@@ -202,21 +262,24 @@ const FacialRecognitionApp = () => {
     const descriptions = [];
 
     for (let i = 0; i < capturedImages.length; i++) {
-      const img = await faceapi.fetchImage(capturedImages[i]);
+      const img = await faceapi.fetchImage(capturedImages[i].src);
       const detection = await faceapi
         .detectSingleFace(img)
         .withFaceLandmarks()
         .withFaceDescriptor();
 
       if (detection) {
-        descriptions.push(detection.descriptor);
+        descriptions.push({
+          descriptor: detection.descriptor,
+          location: capturedImages[i].location,
+        });
       }
     }
 
     if (descriptions.length > 0) {
       const newFaceDescriptor = new faceapi.LabeledFaceDescriptors(
         personName,
-        descriptions
+        descriptions.map((d) => d.descriptor)
       );
       const existingDescriptors = JSON.parse(
         localStorage.getItem("faceDescriptors") || "[]"
@@ -224,6 +287,7 @@ const FacialRecognitionApp = () => {
       existingDescriptors.push({
         label: newFaceDescriptor.label,
         descriptors: newFaceDescriptor.descriptors.map((d) => Array.from(d)),
+        locations: descriptions.map((d) => d.location),
       });
       localStorage.setItem(
         "faceDescriptors",
@@ -264,8 +328,11 @@ const FacialRecognitionApp = () => {
 
       if (resizedDetections.length === 0) {
         setRecognizedName("Person not detected");
+        setLocation(null);
         return;
       }
+
+      let recognizedPerson = null;
 
       resizedDetections.forEach((detection) => {
         const result = faceMatcher.findBestMatch(detection.descriptor);
@@ -286,20 +353,30 @@ const FacialRecognitionApp = () => {
             },
           });
           drawBox.draw(canvas);
+
+          if (result.label !== "unknown") {
+            recognizedPerson = result;
+          }
         }
       });
 
-      if (resizedDetections.length > 0) {
-        const result = faceMatcher.findBestMatch(
-          resizedDetections[0].descriptor
-        );
-        setRecognizedName(
-          result.label !== "unknown" ? result.label : "Unknown person"
-        );
+      if (recognizedPerson) {
+        setRecognizedName(recognizedPerson.label);
+        try {
+          const currentLocation = await getLocation();
+          setLocation(currentLocation);
+        } catch (error) {
+          console.error("Error getting location:", error);
+          setLocation(null);
+        }
+      } else {
+        setRecognizedName("Unknown person");
+        setLocation(null);
       }
     } catch (error) {
       console.error("Error in recognizeFace:", error);
       setRecognizedName("Error detecting face");
+      setLocation(null);
     }
   };
 
@@ -341,11 +418,16 @@ const FacialRecognitionApp = () => {
         <button
           onClick={captureImage}
           disabled={
-            isTraining || !faceDetected || facePosition !== "Good position"
+            isTraining ||
+            !faceDetected ||
+            facePosition !== "Good position" ||
+            isGettingLocation
           }
           className={capturedImages.length >= 5 ? "complete" : ""}
         >
-          Capture Image ({capturedImages.length}/5)
+          {isGettingLocation
+            ? "Getting Location..."
+            : `Capture Image (${capturedImages.length}/5)`}
         </button>
         <button
           onClick={trainModel}
@@ -356,13 +438,27 @@ const FacialRecognitionApp = () => {
         </button>
       </div>
       <div className="captured-images">
-        {capturedImages.map((src, index) => (
-          <img
-            key={index}
-            src={src}
-            alt={`Captured ${index + 1}`}
-            className="captured-image"
-          />
+        {capturedImages.map((image, index) => (
+          <div key={index} className="captured-image-container">
+            <img
+              src={image.src}
+              alt={`Captured ${index + 1}`}
+              className="captured-image"
+            />
+            {image.location && (
+              <div className="image-location">
+                <p>
+                  Lat: {image.location.latitude.toFixed(4)}, Lon:{" "}
+                  {image.location.longitude.toFixed(4)}
+                </p>
+                <p>
+                  {image.location.city}, {image.location.state},{" "}
+                  {image.location.country}
+                </p>
+                <p>{image.location.fullAddress}</p>
+              </div>
+            )}
+          </div>
         ))}
       </div>
     </div>
@@ -384,6 +480,19 @@ const FacialRecognitionApp = () => {
       <div className="recognition-result">
         <h3>Recognition Result:</h3>
         <p>{recognizedName}</p>
+        {location && (
+          <div className="current-location">
+            <p>Current Location:</p>
+            <p>
+              Lat: {location.latitude.toFixed(4)}, Lon:{" "}
+              {location.longitude.toFixed(4)}
+            </p>
+            <p>
+              {location.city}, {location.state}, {location.country}
+            </p>
+            <p>{location.fullAddress}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -391,7 +500,7 @@ const FacialRecognitionApp = () => {
   return (
     <div className="facial-recognition-app">
       <header>
-        <h1>Facial Recognition System</h1>
+        <h1>Facial Recognition System with Geolocation</h1>
       </header>
       {!isModelLoaded ? (
         <div className="loading">
